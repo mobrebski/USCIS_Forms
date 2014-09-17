@@ -1,0 +1,8 @@
+<component name="org.nuxeo.deloitte.MakePDF">
+
+  <extension target="org.nuxeo.ecm.core.operation.OperationServiceComponent"
+    point="operations" >
+      <operation class="org.nuxeo.deloitte.MakePDF" />
+   </extension>
+    
+</component>
