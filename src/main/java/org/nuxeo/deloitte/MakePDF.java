@@ -107,16 +107,11 @@ public class MakePDF {
 
         Framework.trackFile(savedFile, pdf);
 
-        //Create and add into Application Doc
-        DocumentModel application = session.createDocumentModel(
-                inputDoc.getPathAsString(), formName+".pdf", "Application");
-        application.setPropertyValue("dc:title", formName+".pdf");
-
-        BlobHolder bh = application.getAdapter(BlobHolder.class);
+        BlobHolder bh = inputDoc.getAdapter(BlobHolder.class);
 
         bh.setBlob(pdf);
 
-        session.createDocument(application);
+        session.saveDocument(inputDoc);
 
         return pdf;
     }
