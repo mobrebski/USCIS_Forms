@@ -14,7 +14,7 @@
         <artifactId>nuxeo-distribution</artifactId>
         <scope>import</scope>
         <type>pom</type>
-        <version>5.9.6</version>
+        <version>5.9.5</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

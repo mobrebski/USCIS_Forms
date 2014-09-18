@@ -6,84 +6,183 @@ package org.nuxeo.deloitte;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
+import java.util.Calendar;
+import java.util.GregorianCalendar;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Properties;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDField;
+import org.nuxeo.ecm.automation.AutomationService;
+import org.nuxeo.ecm.automation.OperationContext;
 import org.nuxeo.ecm.automation.core.Constants;
+import org.nuxeo.ecm.automation.core.annotations.Context;
 import org.nuxeo.ecm.automation.core.annotations.Operation;
 import org.nuxeo.ecm.automation.core.annotations.OperationMethod;
 import org.nuxeo.ecm.automation.core.annotations.Param;
 import org.nuxeo.ecm.automation.core.collectors.BlobCollector;
 import org.nuxeo.ecm.core.api.Blob;
+import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
+import org.nuxeo.ecm.core.api.blobholder.BlobHolder;
 import org.nuxeo.ecm.core.api.impl.blob.FileBlob;
+import org.nuxeo.ecm.core.api.model.PropertyNotFoundException;
+import org.nuxeo.runtime.api.Framework;
 
 /**
  * @author mikeobrebski
  */
-@Operation(id=MakePDF.ID, category=Constants.CAT_CONVERSION, label="MakePDF", description="Fills selected PDF form with data from Document by matching fields")
+@Operation(id = MakePDF.ID, category = Constants.CAT_CONVERSION, label = "MakePDF", description = "Fills selected PDF form with data from Document by matching fields")
 public class MakePDF {
 
     public static final String ID = "MakePDF";
 
     protected final Log log = LogFactory.getLog(MakePDF.class);
 
+    @Context
+    protected CoreSession session;
+
+    @Context
+    protected OperationContext context;
+
+    @Context
+    protected AutomationService as;
+
     @Param(name = "formName", required = true)
     protected String formName;
 
-    @OperationMethod(collector = BlobCollector.class)
-    public Blob run(DocumentModel input) {
+    private Properties mappings;
 
-        Properties mappings = new Properties();
+    private PDDocument pdfDoc;
+
+    private DocumentModel inputDoc;
+
+    private File savedFile;
+
+    @OperationMethod(collector = BlobCollector.class)
+    public Blob run(DocumentModel input) throws Exception {
+
+        mappings = new Properties();
+        inputDoc = input;
 
         try {
-            mappings.load(new FileInputStream("USCIS_Forms/"+formName + ".properties"));
+            FileInputStream mappingInput = new FileInputStream("USCIS_Forms/"
+                    + formName + ".properties");
+            mappings.load(mappingInput);
+            mappingInput.close();
         } catch (Exception e) {
-            log.error("Cannot open PDF mapping properties for - "+formName);
+            log.error("Cannot open PDF mapping - USCIS_Forms/" + formName
+                    + ".properties");
             e.printStackTrace();
-            return null;
+            throw e;
         }
 
         // Open PDF
-        InputStream fileInput;
-        try {
-            fileInput = new FileInputStream("USCIS_Forms/"+formName + ".pdf");
-        } catch (FileNotFoundException e) {
-            log.error("Cannot open PDF file template for - "+formName);
-            e.printStackTrace();
-            return null;
+        pdfDoc = PDDocument.load(new File("USCIS_Forms/" + formName + ".pdf"));
+        if (pdfDoc.isEncrypted()) {
+            try {
+                pdfDoc.decrypt("");
+                pdfDoc.setAllSecurityToBeRemoved(true);
+            } catch (Exception e) {
+                throw new Exception("Cannot Decrypt", e);
+            }
         }
 
-        // Open and prepare PDF Doc
+        fillFields();
 
-        // Loop through Doc and populate fields
+        savedFile = new File("tmp/" + inputDoc.getId() + "_" + formName
+                + ".pdf");
+        pdfDoc.save(savedFile);
+        pdfDoc.close();
 
-        // Close
-        try {
-            fileInput.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
 
-        File file = new File("tmp/"+formName+".pdf");
+        FileBlob pdf = new FileBlob(savedFile, "application/pdf", null, formName + ".pdf", null);
+        context.put("currentDocument", inputDoc.getId());
 
-        try {
-            file.createNewFile();
-        } catch (IOException e) {
-            log.error("Cannot open PDF file template");
-            e.printStackTrace();
-            return null;
-        }
+        Framework.trackFile(savedFile, pdf);
 
-        log.warn(file.getAbsolutePath());
+        //Create and add into Application Doc
+        DocumentModel application = session.createDocumentModel(
+                inputDoc.getPathAsString(), formName+".pdf", "Application");
+        application.setPropertyValue("dc:title", formName+".pdf");
 
-        FileBlob pdf = new FileBlob(file);
+        BlobHolder bh = application.getAdapter(BlobHolder.class);
+
+        bh.setBlob(pdf);
+
+        session.createDocument(application);
+
         return pdf;
     }
 
+    @SuppressWarnings("rawtypes")
+    protected void fillFields() throws IOException {
+        PDDocumentCatalog docCatalog = pdfDoc.getDocumentCatalog();
+        PDAcroForm acroForm = docCatalog.getAcroForm();
+        List fields = acroForm.getFields();
+        Iterator fieldsIter = fields.iterator();
+
+        while (fieldsIter.hasNext()) {
+            PDField field = (PDField) fieldsIter.next();
+            processField(field);
+        }
+
+    }
+
+    @SuppressWarnings("rawtypes")
+    protected void processField(PDField field) throws IOException {
+        List kids = field.getKids();
+        if (kids != null) {
+            Iterator kidsIter = kids.iterator();
+
+            while (kidsIter.hasNext()) {
+                Object pdfObj = kidsIter.next();
+                if (pdfObj instanceof PDField) {
+                    PDField kid = (PDField) pdfObj;
+                    processField(kid);
+                }
+            }
+        } else {
+
+            String  nuxeoFieldName;
+            Object value = null;
+            try {
+                nuxeoFieldName = mappings.getProperty(field.getFullyQualifiedName());
+                value = inputDoc.getProperty("applicant_data", nuxeoFieldName);
+            } catch (PropertyNotFoundException ex) {
+                return;
+            }
+
+            if (value instanceof String) {
+                String fieldValue = (String)value;
+                field.setValue(fieldValue);
+
+                log.warn(field.getFullyQualifiedName() + " = " + fieldValue
+                        + " --- " + nuxeoFieldName);
+            } else if (value instanceof GregorianCalendar) {
+                GregorianCalendar cal = (GregorianCalendar)value;
+                String date = ""+cal.get(Calendar.MONTH)+" / "+cal.get(Calendar.DAY_OF_MONTH)+" / "+cal.get(Calendar.YEAR);
+                field.setValue(date);
+                log.warn(field.getFullyQualifiedName() + " = " + date
+                        + " --- " + nuxeoFieldName);
+            } else if (value instanceof Boolean) {
+                Boolean bool = (Boolean)value;
+                if (bool.booleanValue()) {
+                    field.setValue("On");
+                } else {
+                    field.setValue("Off");
+                }
+                log.warn(field.getFullyQualifiedName() + " = " + bool
+                        + " --- " + nuxeoFieldName);
+            }
+
+        }
+    }
 
 }
