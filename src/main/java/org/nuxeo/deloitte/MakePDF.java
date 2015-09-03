@@ -94,7 +94,7 @@ public class MakePDF {
             }
         }
 
-        fillFields();
+        //fillFields();
 
         savedFile = new File("tmp/" + inputDoc.getId() + "_" + formName
                 + ".pdf");

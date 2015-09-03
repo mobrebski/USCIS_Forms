@@ -3,10 +3,7 @@ Bundle-Vendor: Nuxeo
 Bundle-ActivationPolicy: lazy
 Bundle-ClassPath: .
 Bundle-Version: 1.0.qualifier
-Bundle-Name: USCIS_Forms
+Bundle-Name: uscis-forms
 Bundle-ManifestVersion: 2
-Nuxeo-Component: OSGI-INF/extensions/org.nuxeo.deloitte.MyCompleteTask
- Operation.xml,OSGI-INF/extensions/org.nuxeo.deloitte.MakePDF.xml
-Bundle-SymbolicName: USCIS_Forms
-Bundle-RequiredExecutionEnvironment: JavaSE-1.7
-
+Bundle-SymbolicName: uscis-forms
+Nuxeo-Component: OSGI-INF/extensions/org.nuxeo.deloitte.MyCompleteTaskOperation.xml, OSGI-INF/extensions/org.nuxeo.deloitte.MakePDF.xml
